@@ -68,15 +68,10 @@ class DirectoryWatcher {
   }
 }
 
-// 使用例
 const configs: WatchConfig[] = [
   {
-    source: "./source1",
-    destination: "./output1",
-  },
-  {
-    source: "./source2",
-    destination: "./output2",
+    source: "../src/main/resources",
+    destination: "../build/resources/main",
   },
 ];
 
