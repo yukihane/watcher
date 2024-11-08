@@ -1,64 +1,84 @@
-import * as chokidar from "chokidar";
-import * as fs from "fs-extra";
+import chokidar, { FSWatcher } from "chokidar";
+import * as fse from "fs-extra";
 import * as path from "path";
 
-class FileWatcher {
-  private watcher: chokidar.FSWatcher;
+interface WatchConfig {
+  source: string; // 監視元ディレクトリ
+  destination: string; // コピー先ディレクトリ
+}
 
-  constructor(
-    private readonly srcDir: string,
-    private readonly destDir: string
-  ) {
-    this.validatePaths();
-    this.watcher = this.initializeWatcher();
-  }
+class DirectoryWatcher {
+  private watchers: FSWatcher[] = [];
 
-  private validatePaths(): void {
-    if (!fs.existsSync(this.srcDir)) {
-      throw new Error(`Source directory does not exist: ${this.srcDir}`);
-    }
-    fs.ensureDirSync(this.destDir);
-  }
+  constructor(private configs: WatchConfig[]) {}
 
-  private initializeWatcher(): chokidar.FSWatcher {
-    return chokidar.watch(this.srcDir, {
-      ignored: /(^|[\/\\])\../,
-      persistent: true,
-      ignoreInitial: false,
+  start() {
+    this.configs.forEach((config) => {
+      const watcher = chokidar.watch(config.source, {
+        persistent: true,
+        ignoreInitial: false,
+      });
+
+      // ファイル追加・変更時
+      watcher
+        .on("add", async (filepath) => {
+          await this.copyFile(filepath, config);
+        })
+        .on("change", async (filepath) => {
+          await this.copyFile(filepath, config);
+        });
+
+      // ファイル削除時
+      watcher.on("unlink", async (filepath) => {
+        await this.removeFile(filepath, config);
+      });
+
+      this.watchers.push(watcher);
     });
   }
 
-  private async copyFile(filePath: string): Promise<void> {
+  stop() {
+    this.watchers.forEach((watcher) => watcher.close());
+    this.watchers = [];
+  }
+
+  private async copyFile(filepath: string, config: WatchConfig) {
+    const relativePath = path.relative(config.source, filepath);
+    const destPath = path.join(config.destination, relativePath);
+
     try {
-      const relativePath = path.relative(this.srcDir, filePath);
-      const destPath = path.join(this.destDir, relativePath);
-      await fs.ensureDir(path.dirname(destPath));
-      await fs.copy(filePath, destPath);
-      console.log(`✓ Copied: ${relativePath}`);
-    } catch (err) {
-      console.error(`✗ Error copying ${filePath}:`, err);
+      await fse.ensureDir(path.dirname(destPath));
+      await fse.copy(filepath, destPath);
+      console.log(`Copied: ${filepath} -> ${destPath}`);
+    } catch (error) {
+      console.error(`Error copying file: ${error}`);
     }
   }
 
-  public start(): void {
-    this.watcher
-      .on("add", (path) => this.copyFile(path))
-      .on("change", (path) => this.copyFile(path))
-      .on("ready", () => console.log("👀 Watching for changes..."));
-  }
+  private async removeFile(filepath: string, config: WatchConfig) {
+    const relativePath = path.relative(config.source, filepath);
+    const destPath = path.join(config.destination, relativePath);
 
-  public stop(): void {
-    this.watcher.close();
+    try {
+      await fse.remove(destPath);
+      console.log(`Removed: ${destPath}`);
+    } catch (error) {
+      console.error(`Error removing file: ${error}`);
+    }
   }
 }
 
-// エントリーポイント
-const [, , srcDir, destDir] = process.argv;
+// 使用例
+const configs: WatchConfig[] = [
+  {
+    source: "./source1",
+    destination: "./output1",
+  },
+  {
+    source: "./source2",
+    destination: "./output2",
+  },
+];
 
-if (!srcDir || !destDir) {
-  console.error("Usage: ts-node watcher.ts <source-dir> <destination-dir>");
-  process.exit(1);
-}
-
-const watcher = new FileWatcher(srcDir, destDir);
+const watcher = new DirectoryWatcher(configs);
 watcher.start();
